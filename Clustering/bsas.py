@@ -1,119 +1,91 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-def bsas_clustering(X, theta, max_clusters):
+def bsas_clustering(puntos_de_datos, umbral, max_clusters, orden_procesamiento):
     """
-    Algoritmo Básico de Agrupamiento Secuencial (BSAS).
+    Implementación del algoritmo de agrupamiento BSAS (Basic Sequential Algorithmic Scheme).
 
-    :param X: Matriz de datos (numpy array, donde cada fila es un punto).
-    :param theta: Umbral de disimilitud (distancia máxima para crear un nuevo clúster).
-    :param max_clusters: Número máximo de clústeres permitidos.
-    :return: Lista de etiquetas de clúster para cada punto.
+    Args:
+        puntos_de_datos (np.array): Matriz de datos donde las columnas son muestras y las filas son características.
+        umbral (float): La distancia máxima (theta) para que un punto se una a un clúster existente.
+        max_clusters (int): El número máximo de clústeres (q) que se pueden crear.
+        orden_procesamiento (list or np.array): El orden en el que se procesarán los puntos de datos.
+
+    Returns:
+        tuple: Una tupla que contiene las etiquetas de los clústeres asignados y los centroides finales.
     """
-    # 1. Inicialización
+    num_caracteristicas, num_muestras = puntos_de_datos.shape
 
-    # Asigna el primer punto al clúster 0. Las etiquetas son las que devolveremos.
-    labels = np.full(len(X), -1)
-    labels[0] = 0
+    # Si se proporciona un orden, reordena los datos para su procesamiento
+    if len(orden_procesamiento) == num_muestras:
+        puntos_de_datos = puntos_de_datos[:, orden_procesamiento]
 
-    # Lista para almacenar los centroides de los clústeres.
-    centroids = [X[0].copy()]
+    # Inicialización
+    num_clusters_actual = 1
+    asignaciones = np.zeros(num_muestras, dtype=int)
 
-    # Contador de clústeres creados.
-    num_clusters = 1
+    # El primer punto de datos forma el primer clúster
+    asignaciones[0] = num_clusters_actual
+    centroides = puntos_de_datos[:, [0]]  # El primer centroide es el primer punto
 
-    # Función para calcular la distancia euclidiana al cuadrado (más rápido).
-    def euclidean_distance_sq(a, b):
-        return np.sum((a - b) ** 2)
+    # Itera a través de los puntos de datos restantes
+    for i in range(1, num_muestras):
+        punto_actual = puntos_de_datos[:, i]
 
-    # Convertimos theta al cuadrado para evitar calcular la raíz cuadrada en cada iteración
-    # (ya que solo comparamos distancias y no necesitamos el valor real).
-    theta_sq = theta ** 2
+        # Calcula la distancia euclidiana del punto actual a todos los centroides existentes
+        distancias = np.linalg.norm(centroides - punto_actual.reshape(-1, 1), axis=0)
 
-    # 2. Procesamiento Secuencial
-    for i in range(1, len(X)):
-        point = X[i]
+        distancia_minima = np.min(distancias)
+        indice_centroide_cercano = np.argmin(distancias)
 
-        # A) Buscar el clúster más cercano
-        min_distance_sq = float('inf')
-        closest_cluster_index = -1
-
-        for k in range(num_clusters):
-            centroid = centroids[k]
-            # Medir la distancia del punto al centroide (prototipo)
-            dist_sq = euclidean_distance_sq(point, centroid)
-
-            if dist_sq < min_distance_sq:
-                min_distance_sq = dist_sq
-                closest_cluster_index = k
-
-        # B) Criterio de Asignación/Creación
-
-        # Si la distancia es mayor al umbral Y no hemos alcanzado el límite de clústeres
-        if min_distance_sq > theta_sq and num_clusters < max_clusters:
-            # Crear un nuevo clúster (Cluster $m+1$)
-            labels[i] = num_clusters
-            centroids.append(point.copy())
-            num_clusters += 1
-
+        # Si el punto está "lejos" y no hemos alcanzado el máximo de clústeres
+        if distancia_minima > umbral and num_clusters_actual < max_clusters:
+            num_clusters_actual += 1
+            asignaciones[i] = num_clusters_actual
+            # El nuevo punto se convierte en un nuevo centroide
+            centroides = np.hstack((centroides, punto_actual.reshape(-1, 1)))
+       # Si el punto está "cerca" de un clúster existente
         else:
-            # Asignar a Ck y actualizar su centroide
-            labels[i] = closest_cluster_index
+            # Asigna el punto al clúster más cercano (índice + 1 para etiquetas base 1)
+            asignaciones[i] = indice_centroide_cercano + 1
 
-            # Recalcular el centroide del clúster Ck de forma incremental
-            current_cluster_indices = np.where(labels == closest_cluster_index)[0]
-            count = len(current_cluster_indices)
+            # Actualiza el centroide del clúster asignado usando un promedio móvil
+            etiqueta_asignada = asignaciones[i]
+            puntos_en_cluster = np.sum(asignaciones[:i + 1] == etiqueta_asignada)
 
-            # Fórmula de actualización del centroide:
-            # nuevo_centroide = (viejo_centroide * (count - 1) + nuevo_punto) / count
+            centroide_a_actualizar = centroides[:, indice_centroide_cercano]
+            nuevo_centroide = ((puntos_en_cluster - 1) * centroide_a_actualizar + punto_actual) / puntos_en_cluster
+            centroides[:, indice_centroide_cercano] = nuevo_centroide
 
-            # En la práctica, con el punto ya añadido, simplemente recalculamos el promedio
-            # de todos los puntos que ahora pertenecen al clúster.
-            # En el esquema puramente secuencial y online, la actualización es incremental
-            # para no necesitar todos los puntos anteriores, pero para este ejemplo simple
-            # y por robustez, recalcularemos el centroide como el promedio.
-            centroids[closest_cluster_index] = np.mean(X[current_cluster_indices], axis=0)
-
-    return labels, centroids, num_clusters
+    return asignaciones, centroides
 
 
-# -----------------------------------
-## 🚀 Ejemplo de Uso
-# -----------------------------------
+# Ejecución
 
-# 1. Generar datos de ejemplo (3 clústeres en 2D)
-np.random.seed(42)
-N = 300
-X1 = np.random.randn(N // 3, 2) + np.array([5, 5])
-X2 = np.random.randn(N // 3, 2) + np.array([-5, -5])
-X3 = np.random.randn(N // 3, 2) + np.array([5, -5])
-X = np.vstack([X1, X2, X3])
-np.random.shuffle(X)  # Es crucial para un algoritmo secuencial
+np.random.seed(0)
+cluster1 = np.random.randn(2, 20) + np.array([[5], [5]])
+cluster2 = np.random.randn(2, 20) + np.array([[0], [0]])
+cluster3 = np.random.randn(2, 20) + np.array([[5], [-5]])
 
-# 2. Definir parámetros
-THETA = 4.0  # Umbral de distancia. Un valor más bajo crea más clústeres.
-MAX_CLUSTERS = 10  # Límite máximo de clústeres
+X = np.hstack((cluster1, cluster2, cluster3))
 
-# 3. Ejecutar el algoritmo BSAS
-labels, centroids, final_clusters = bsas_clustering(X, THETA, MAX_CLUSTERS)
+# Parámetros del algoritmo
+orden_aleatorio = np.random.permutation(X.shape[1])
+umbral_distancia = 4.0
+clusters_maximos = 5
 
-print(f"Parámetros: Θ = {THETA}, q = {MAX_CLUSTERS}")
-print(f"Número final de clústeres encontrados: {final_clusters}")
+etiquetas, centroides_finales = bsas_clustering(X, umbral_distancia, clusters_maximos, orden_aleatorio)
 
-# 4. Visualizar los resultados
-plt.figure(figsize=(10, 7))
-scatter = plt.scatter(X[:, 0], X[:, 1], c=labels, cmap='viridis', s=50, alpha=0.7)
+# Visualización de los resultados
+plt.figure(figsize=(8, 6))
+for k in np.unique(etiquetas):
+    indices = np.where(etiquetas == k)
+    plt.scatter(X[0, indices], X[1, indices], label=f'Clúster {k}')
 
-# Dibujar los centroides
-centroids = np.array(centroids)
-plt.scatter(centroids[:, 0], centroids[:, 1], c='red', marker='X', s=200, label='Centroides')
-
-# Crear leyenda para los clústeres
-legend1 = plt.legend(*scatter.legend_elements(), title="Clústeres")
-plt.gca().add_artist(legend1)
-
-plt.title(f'Agrupamiento Secuencial Básico (BSAS) con Θ={THETA}')
+plt.scatter(centroides_finales[0, :], centroides_finales[1, :], c='black', marker='x', s=100, label='Centroides')
+plt.title('Agrupamiento BSAS')
 plt.xlabel('Característica 1')
 plt.ylabel('Característica 2')
-plt.grid(True, alpha=0.3)
+plt.legend()
+plt.grid(True)
 plt.show()
